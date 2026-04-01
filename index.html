@@ -469,12 +469,28 @@
             requestLS(parentPath);
         };
         mkdirBtn.onclick = () => {
-            const dirName = prompt('請輸入新目錄名稱:');
-            if (dirName) {
-                sendFsCommand('MKDIR', currentPath, { name: dirName });
-                // 延遲 500ms 後刷新列表
-                setTimeout(() => requestLS(currentPath), 500);
+            let dirName = prompt('請輸入新目錄名稱:');
+            
+            // 1. 檢查是否取消輸入
+            if (dirName === null) return;
+
+            // 2. 去除前後空白並檢查是否為空
+            dirName = dirName.trim();
+            if (!dirName) {
+                alert('目錄名稱不能為空！');
+                return;
             }
+
+            // 3. 檢查非法字元 (\ / : * ? " < > |)
+            const invalidChars = /[\\/:*?"<>|]/;
+            if (invalidChars.test(dirName)) {
+                alert('目錄名稱不能包含以下特殊字元：\n\\ / : * ? " < > |');
+                return;
+            }
+
+            sendFsCommand('MKDIR', currentPath, { name: dirName });
+            // 延遲 500ms 後刷新列表
+            setTimeout(() => requestLS(currentPath), 500);
         };
 
 
