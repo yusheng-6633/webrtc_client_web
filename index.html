@@ -46,9 +46,16 @@
             <input type="text" id="chatInput" placeholder="輸入訊息..." disabled />
             <button id="sendBtn" disabled>傳送</button>
             <div id="file-transfer-container">
-                <input type="file" id="fileInput" disabled>
+                <input type="file" id="fileInput" disabled multiple>
                 <div id="download-area"></div>
-                <div id="progress-bar"><div id="progress" style="background-color: #4CAF50; height: 100%; width: 0; border-radius: 5px;"></div></div>
+                <div id="file-status" style="margin-top: 10px; font-size: 0.85em; color: #555;"></div>
+                <div id="progress-bar" style="width: 100%; background-color: #f0f0f0; border-radius: 5px; height: 20px; margin-top: 5px; display: none;">
+                    <div id="progress" style="background-color: #4CAF50; height: 100%; width: 0; border-radius: 5px;"></div>
+                </div>
+                <div id="total-status" style="margin-top: 10px; font-size: 0.85em; font-weight: bold;"></div>
+                <div id="total-progress-bar" style="width: 100%; background-color: #f0f0f0; border-radius: 5px; height: 10px; margin-top: 5px; display: none;">
+                    <div id="total-progress" style="background-color: #2196F3; height: 100%; width: 0; border-radius: 5px;"></div>
+                </div>
             </div>
             
             <div id="file-browser">
@@ -81,6 +88,10 @@
         const fileListContainer = document.getElementById('fileList');
         const progressBar = document.getElementById('progress'); // 內層進度條
         const progressBarContainer = document.getElementById('progress-bar'); // 外層進度條容器
+        const totalProgressBar = document.getElementById('total-progress');
+        const totalProgressBarContainer = document.getElementById('total-progress-bar');
+        const fileStatusLabel = document.getElementById('file-status');
+        const totalStatusLabel = document.getElementById('total-status');
         const contextMenu = document.getElementById('context-menu');
 
         let peerConnection;
@@ -88,6 +99,14 @@
         let roomName;
         let currentPath = '/'; // 追蹤目前目錄路徑
         let selectedFileAction = null; // 紀錄目前右鍵點擊的檔案資訊
+
+        // --- 續傳狀態管理 ---
+        let transferQueue = [];     // 儲存待傳送的 File 物件陣列
+        let currentFileIndex = 0;   // 目前處理到第幾個檔案
+        let currentOffset = 0;      // 目前檔案已傳送的位元組數
+        let isTransferring = false; // 是否正在傳送中
+        let failedFiles = [];       // 紀錄失敗的檔案
+        // -------------------
 
         // STUN 伺服器設定，用於 NAT 穿透
         const iceServers = {
@@ -241,6 +260,11 @@
                 console.log("Data Channel 已開啟");
                 appendMessage('系統', 'P2P 連線已建立！');
                 fileListContainer.innerText = '連線成功！請點擊上方按鈕獲取目錄列表。';
+                
+                if (isTransferring) {
+                    appendMessage('系統', '檢測到中斷的傳送任務，正在嘗試自動續傳...');
+                    sendNextFile(); 
+                }
                 enableChatAndFileTransfer();
             };
             dataChannel.onclose = () => {
@@ -459,58 +483,123 @@
 
         // 檔案傳輸邏輯與 sender 端完全相同
         fileInput.onchange = () => {
-            const file = fileInput.files[0];
-            if (!file || !dataChannel || dataChannel.readyState !== 'open') return;
+            transferQueue = Array.from(fileInput.files);
+            if (transferQueue.length === 0) return;
+            
+            currentFileIndex = 0;
+            currentOffset = 0;
+            failedFiles = [];
+            isTransferring = true;
 
-            appendMessage('系統', `開始傳送檔案: ${file.name}`);
-            // 傳送檔案資訊，並包含目標路徑
-            dataChannel.send(JSON.stringify({ 
-                type: 'file-meta', 
-                name: file.name, 
-                size: file.size,
-                path: currentPath 
-            }));
+            totalProgressBarContainer.style.display = 'block';
+            progressBarContainer.style.display = 'block';
+            
+            if (!dataChannel || dataChannel.readyState !== 'open') {
+                appendMessage('系統', '連線未就緒，將在連線建立後自動開始傳送。');
+                return;
+            }
 
-            const chunkSize = 16384; // 16KB
-            let offset = 0;
+            sendNextFile();
+        };
 
-            const sendChunk = () => {
-                // 檢查緩衝區是否已滿。設定一個 1MB 的安全閾值。
-                const bufferFullThreshold = 1024 * 1024;
-                if (dataChannel.bufferedAmount > bufferFullThreshold) {
-                    // 等待緩衝區排空。
-                    dataChannel.onbufferedamountlow = () => {
-                        dataChannel.onbufferedamountlow = null; // 使用一次性監聽器
-                        sendChunk();
-                    };
-                    return; // 暫停傳送
-                }
+        // 輔助函式：處理檔案失敗並跳到下一個檔案
+        const handleFailure = (fileName, errorMsg) => {
+            appendMessage('系統', `❌ 檔案 ${fileName} 傳送失敗: ${errorMsg}`);
+            failedFiles.push(fileName);
+            currentFileIndex++;
+            currentOffset = 0; // 失敗後重置位移量
+            progressBar.style.width = '0%'; 
+            setTimeout(sendNextFile, 500); 
+        };
 
-                if (offset >= file.size) {
-                    dataChannel.send(JSON.stringify({ type: 'file-end' }));
-                    appendMessage('系統', `檔案 ${file.name} 傳送完成。`);
-                    // 傳送完成後，延遲刷新列表以確認檔案已出現在遠端
-                    setTimeout(() => requestLS(currentPath), 1000);
+        const sendNextFile = () => {
+            if (!dataChannel || dataChannel.readyState !== 'open') {
+                isTransferring = true; // 標記為傳送中，等待 onopen
+                appendMessage('系統', '連線中斷，傳送已暫停，等待恢復...');
+                return;
+            }
+
+            if (currentFileIndex >= transferQueue.length) {
+                const successCount = transferQueue.length - failedFiles.length;
+                let resultMsg = `傳送任務結束。成功: ${successCount}, 失敗: ${failedFiles.length}`;
+                appendMessage('系統', resultMsg);
+                totalStatusLabel.innerText = resultMsg;
+                fileStatusLabel.innerText = '';
+                fileInput.value = ''; 
+                isTransferring = false;
+                return;
+            }
+
+            const file = transferQueue[currentFileIndex];
+            fileStatusLabel.innerText = `正在傳送 (${currentFileIndex + 1}/${transferQueue.length}): ${file.name} ${currentOffset > 0 ? '(續傳中)' : ''}`;
+            totalStatusLabel.innerText = `總進度: 已完成 ${currentFileIndex} / ${transferQueue.length} 個檔案`;
+            totalProgressBar.style.width = (currentFileIndex / transferQueue.length * 100) + '%';
+
+                try {
+                    // 傳送檔案資訊，並包含目標路徑
+                    dataChannel.send(JSON.stringify({ 
+                        type: 'file-meta', 
+                        name: file.name, 
+                        size: file.size,
+                        path: currentPath,
+                        startOffset: currentOffset // 告知接收端從哪裡開始寫入
+                    }));
+                } catch (err) {
+                    handleFailure(file.name, "無法發送元數據: " + err.message);
                     return;
                 }
 
-                const slice = file.slice(offset, offset + chunkSize);
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    try {
-                        dataChannel.send(e.target.result);
-                        offset += e.target.result.byteLength;
-                        sendChunk(); // 繼續傳送下一個區塊
-                    } catch (error) {
-                        console.error('Failed to send file chunk:', error);
-                        appendMessage('系統', `檔案傳送失敗: ${error.message}`);
-                    }
-                };
-                reader.readAsArrayBuffer(slice);
-            };
+                const chunkSize = 16384; // 16KB
 
-            // 開始傳送流程
-            sendChunk();
+                const sendChunk = () => {
+                    // 檢查緩衝區是否已滿
+                    const bufferFullThreshold = 1024 * 1024;
+                    if (dataChannel.bufferedAmount > bufferFullThreshold) {
+                        dataChannel.onbufferedamountlow = () => {
+                            dataChannel.onbufferedamountlow = null;
+                            sendChunk();
+                        };
+                        return;
+                    }
+
+                    if (currentOffset >= file.size) {
+                        dataChannel.send(JSON.stringify({ type: 'file-end' }));
+                        appendMessage('系統', `檔案 ${file.name} 傳送完成。`);
+                        
+                        currentOffset = 0; // 完成後重置位移量
+                        const overallPercent = ((currentFileIndex + 1) / transferQueue.length) * 100;
+                        totalProgressBar.style.width = overallPercent + '%';
+                        
+                        setTimeout(() => {
+                            requestLS(currentPath);
+                            currentFileIndex++;
+                            sendNextFile();
+                        }, 500); 
+                        return;
+                    }
+
+                    const slice = file.slice(currentOffset, currentOffset + chunkSize);
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            dataChannel.send(e.target.result);
+                            currentOffset += e.target.result.byteLength;
+
+                                // 更新單一檔案的進度條
+                                const filePercent = Math.round((currentOffset / file.size) * 100);
+                                progressBar.style.width = filePercent + '%';
+
+                            sendChunk(); // 繼續傳送目前檔案的下一個區塊
+                        } catch (error) {
+                            // 注意：此處錯誤通常代表連線已斷，sendNextFile 會在 onopen 重新觸發
+                                handleFailure(file.name, error.message);
+                        }
+                    };
+                        reader.onerror = () => handleFailure(file.name, "讀取檔案失敗");
+                    reader.readAsArrayBuffer(slice);
+                };
+
+                sendChunk();
         };
 
         function createDownloadLink(blob, fileName) {
