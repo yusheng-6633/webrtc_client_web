@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebRTC 接收端</title>
+    <style>
+        body { font-family: sans-serif; padding: 1em; }
+        .container { max-width: 800px; margin: auto; }
+        .chat-container { flex: 1; }
+        #chatBox { height: 150px; border: 1px solid #ccc; overflow-y: scroll; padding: 5px; margin-bottom: 5px; background-color: #f9f9f9; }
+        #chatInput { width: calc(100% - 80px); padding: 5px; }
+        #sendBtn { padding: 5px 10px; }
+        #file-transfer-container { margin-top: 1em; }
+        #progress-bar { width: 100%; background-color: #f0f0f0; border-radius: 5px; height: 20px; margin-top: 5px; display: none; }
+        /* 檔案瀏覽器樣式 */
+        #file-browser { margin-top: 2em; border: 1px solid #ddd; padding: 10px; border-radius: 5px; }
+        .file-item { cursor: pointer; padding: 5px; border-bottom: 1px dashed #eee; display: flex; align-items: center; }
+        .file-item:hover { background-color: #f0f0f0; }
+        .icon { margin-right: 10px; }
+        #backFsBtn, #refreshFsBtn { margin: 5px 2px; padding: 8px 12px; }
+        /* 右鍵選單樣式 */
+        #context-menu {
+            position: absolute;
+            display: none;
+            background: white;
+            border: 1px solid #ccc;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+            z-index: 1000;
+            min-width: 120px;
+        }
+        #context-menu div { padding: 8px 12px; cursor: pointer; }
+        #context-menu div:hover { background-color: #f0f0f0; }
+    </style>
+</head>
+<body>
+    <h1>WebRTC P2P 接收端 (Receiver)</h1>
+    <label for="signalingServerUrl">信令伺服器 URL:</label>
+    <input type="text" id="signalingServerUrl" placeholder="例如: https://your-app.onrender.com" value="https://webrtc-signaling-server-v1c9.onrender.com" style="width: 300px;" />
+    <input type="text" id="roomName" value="control" placeholder="輸入房間名稱" />
+    <button id="checkRoomBtn">檢查房間</button>
+    <button id="joinRoomBtn">加入房間</button>
+    <hr>
+    <div class="container">
+        <div class="chat-container">
+            <h2>P2P 聊天室</h2>
+            <div id="chatBox"></div>
+            <input type="text" id="chatInput" placeholder="輸入訊息..." disabled />
+            <button id="sendBtn" disabled>傳送</button>
+            <div id="file-transfer-container">
+                <input type="file" id="fileInput" disabled>
+                <div id="download-area"></div>
+                <div id="progress-bar"><div id="progress" style="background-color: #4CAF50; height: 100%; width: 0; border-radius: 5px;"></div></div>
+            </div>
+            
+            <div id="file-browser">
+                <h3>遠端檔案瀏覽器 (Remote FS)</h3>
+                <button id="refreshFsBtn" disabled>重新整理目錄</button>
+                <div id="fileList">尚未連線...</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="context-menu">
+        <div id="menu-rename">更名</div>
+        <div id="menu-delete">刪除</div>
+    </div>
+
+    <!-- 引入 Socket.IO 客戶端庫 -->
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script>
+        let socket; // 將 socket 宣告為 let，以便後續重新賦值
+        const signalingServerUrlInput = document.getElementById('signalingServerUrl');
+        const checkRoomBtn = document.getElementById('checkRoomBtn');
+        const joinRoomBtn = document.getElementById('joinRoomBtn');
+        const roomNameInput = document.getElementById('roomName');
+        const chatBox = document.getElementById('chatBox');
+        const chatInput = document.getElementById('chatInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const fileInput = document.getElementById('fileInput');
+        const refreshFsBtn = document.getElementById('refreshFsBtn');
+         const backFsBtn = document.createElement('button');
+        const fileListContainer = document.getElementById('fileList');
+        const progressBar = document.getElementById('progress'); // 內層進度條
+        const progressBarContainer = document.getElementById('progress-bar'); // 外層進度條容器
+        const contextMenu = document.getElementById('context-menu');
+
+        let peerConnection;
+        let dataChannel;
+        let roomName;
+        let currentPath = '/'; // 追蹤目前目錄路徑
+        let selectedFileAction = null; // 紀錄目前右鍵點擊的檔案資訊
+
+        // STUN 伺服器設定，用於 NAT 穿透
+        const iceServers = {
+            'iceServers': [
+                {'urls': 'stun:stun.l.google.com:19302'}
+            ]
+        };
+            // 設定返回按鈕屬性並加入 DOM
+        backFsBtn.id = 'backFsBtn';
+        backFsBtn.innerText = '回到上一層';
+        backFsBtn.disabled = true;
+        refreshFsBtn.parentNode.insertBefore(backFsBtn, fileListContainer);
+
+        // 點擊 "檢查房間" 按鈕
+        checkRoomBtn.onclick = () => {
+            const roomToCheck = roomNameInput.value;
+            if (roomToCheck === '') {
+                alert('請輸入要檢查的房間名稱');
+                return;
+            }
+
+            // 如果 socket 尚未連線，則建立連線
+            if (!socket || !socket.connected) {
+                socket = io(signalingServerUrlInput.value);
+                setupSocketListeners(socket);
+            }
+
+            // 等待連線成功後再發送事件
+            if (socket.connected) {
+                socket.emit('check room', roomToCheck);
+            } else {
+                socket.once('connect', () => {
+                    socket.emit('check room', roomToCheck);
+                });
+            }
+        };
+
+        // 點擊 "加入房間" 按鈕
+        joinRoomBtn.onclick = () => {
+            roomName = roomNameInput.value;
+            if (roomName === '') {
+                alert('請輸入房間名稱');
+                return;
+            }
+
+            // 如果 socket 尚未連線，則建立連線
+            if (!socket || !socket.connected) {
+                socket = io(signalingServerUrlInput.value);
+                setupSocketListeners(socket);
+            }
+
+            // 等待連線成功後再發送事件
+            if (socket.connected) {
+                emitJoin();
+            } else {
+                socket.once('connect', emitJoin);
+            }
+        };
+
+        function emitJoin() {
+            joinRoomBtn.disabled = true;
+            roomNameInput.disabled = true;
+            // 向伺服器發送 'join' 事件
+            socket.emit('join', roomName);
+        }
+
+        // 將所有 Socket.IO 事件監聽器封裝在一個函數中
+        function setupSocketListeners(socketInstance) {
+            socketInstance.on('joined', (room, id) => {
+                console.log(`已加入房間 ${room}。我的 ID 是 ${id}`);
+            });
+
+            socketInstance.on('full', (room) => {
+                console.log(`房間 ${room} 已滿。`);
+                alert(`房間 ${room} 已滿。`);
+                // 加入失敗，重新啟用 UI 讓使用者重試
+                joinRoomBtn.disabled = false;
+                roomNameInput.disabled = false;
+            });
+
+            // 新增：處理伺服器回傳 'room not found' 的情況
+            socketInstance.on('absence', (room) => {
+                console.log(`Room '${room}' not found.`);
+                alert(`房間 '${room}' 不存在，無法加入。請確認房間名稱是否正確。`);
+                // 加入失敗，重新啟用 UI 讓使用者重試
+                joinRoomBtn.disabled = false;
+                roomNameInput.disabled = false;
+            });
+
+            socketInstance.on('room status', (status) => {
+                // 假設伺服器回傳的 status 物件格式為 { room: 'roomName', exists: true, clientCount: 1 }
+                if (status.exists) {
+                    alert(`房間 '${status.room}' 已存在，目前有 ${status.clientCount} 人。`);
+                } else {
+                    alert(`房間 '${status.room}' 不存在，您可以建立它。`);
+                }
+            });
+
+            socketInstance.on('message', async (message) => {
+                console.log('收到訊息:', message);
+                if (message.type === 'offer') {
+                    // 收到 Offer
+                    // 3. 建立 RTCPeerConnection
+                    if (!peerConnection) {
+                        peerConnection = new RTCPeerConnection(iceServers);
+                        peerConnection.onicecandidate = handleIceCandidate;
+                        // 3a. 監聽 Data Channel (由接收方監聽)
+                        peerConnection.ondatachannel = (event) => {
+                            dataChannel = event.channel;
+                            setupDataChannel();
+                        };
+                    }
+
+                    // 5. 設定遠端描述 (Offer)
+                    try {
+                        const offer = new RTCSessionDescription({ type: 'offer', sdp: message.sdp });
+                        await peerConnection.setRemoteDescription(offer);
+
+                        // 6. 建立 Answer
+                        const answer = await peerConnection.createAnswer();
+                        await peerConnection.setLocalDescription(answer);
+
+                        // 7. 將 Answer 發送給房間中的另一個對等端
+                        console.log('正在發送 Answer:', answer);
+                        socketInstance.emit('message', { room: roomName, type: 'answer', sdp: answer.sdp });
+                    } catch (error) {
+                        console.error('處理 Offer 時發生錯誤:', error);
+                    }
+
+                } else if (message.type === 'candidate') {
+                    // 收到 ICE Candidate
+                    if (!peerConnection) return;
+                    try {
+                        await peerConnection.addIceCandidate(new RTCIceCandidate(message.candidate));
+                    } catch (error) {
+                        console.error('加入收到的 ICE Candidate 時發生錯誤', error);
+                    }
+                }
+            });
+        }
+
+        // 當 PeerConnection 產生 ICE Candidate 時觸發
+        function handleIceCandidate(event) {
+            if (event.candidate) socket.emit('message', { room: roomName, type: 'candidate', candidate: event.candidate });
+        }
+
+        // --- Data Channel 功能 ---
+
+        function setupDataChannel() {
+            dataChannel.onopen = () => {
+                console.log("Data Channel 已開啟");
+                appendMessage('系統', 'P2P 連線已建立！');
+                fileListContainer.innerText = '連線成功！請點擊上方按鈕獲取目錄列表。';
+                enableChatAndFileTransfer();
+            };
+            dataChannel.onclose = () => {
+                console.log("Data Channel 已關閉");
+                appendMessage('系統', 'P2P 連線已中斷。');
+                fileListContainer.innerText = '尚未連線...';
+                disableChatAndFileTransfer();
+            };
+
+            let receivedBuffers = [];
+            let fileMeta;
+
+            dataChannel.onmessage = (event) => {
+                // 檔案傳輸是 ArrayBuffer，文字是 string
+                if (typeof event.data === 'string') {
+                    try {
+                        const message = JSON.parse(event.data);
+                        if (message.type === 'chat') {
+                            appendMessage('對方', message.text);
+                                // 分析 text 內容是否為 JSON 格式的檔案列表回應 (ACK)
+                            try {
+                                const inner = JSON.parse(message.text);
+                                if (inner.status === 'OK' && Array.isArray(inner.data)) {
+                                    console.log('從聊天訊息中解析出檔案列表回應');
+                                    renderFileList(inner.data);
+                                }
+                            } catch (innerError) { /* 普通聊天訊息，不做處理 */ }
+                        } else if (message.type === 'file-meta') {
+                            fileMeta = message;
+                            receivedBuffers = [];
+                            appendMessage('系統', `正在接收檔案: ${fileMeta.name} (${Math.round(fileMeta.size / 1024)} KB)`);
+                            progressBarContainer.style.display = 'block'; // 顯示進度條容器
+                            progressBar.style.width = '0%';
+                        } else if (message.type === 'file-end') {
+                            const receivedFile = new Blob(receivedBuffers);
+                            appendMessage('系統', `檔案 ${fileMeta.name} 接收完成！`);
+                            createDownloadLink(receivedFile, fileMeta.name);
+                            receivedBuffers = [];
+                            progressBar.style.width = '100%';
+                        } else if (message.status === 'OK' && message.data) {
+                            // 處理遠端檔案列表回傳
+                            renderFileList(message.data);
+                        }
+                    } catch (e) { // Fallback for simple text
+                        appendMessage('對方', event.data);
+                    }
+                } else { // ArrayBuffer (file chunk)
+                    receivedBuffers.push(event.data);
+                    if (fileMeta && fileMeta.size) {
+                        const receivedSize = receivedBuffers.reduce((acc, buffer) => acc + buffer.byteLength, 0);
+                        const progress = Math.round((receivedSize / fileMeta.size) * 100);
+                        progressBar.style.width = progress + '%';
+                        progressBarContainer.style.display = 'block'; // 確保在傳輸過程中進度條可見
+                    } else {
+                        // 如果 fileMeta 不存在，重置進度條
+                        progressBar.style.width = '0%';
+                    }
+
+                }
+            };
+        }
+
+        function renderFileList(files) {
+            fileListContainer.innerHTML = '';
+            // 顯示目前路徑
+            const pathHeader = document.createElement('div');
+            pathHeader.style.padding = '5px';
+            pathHeader.style.fontWeight = 'bold';
+            pathHeader.style.backgroundColor = '#eee';
+            pathHeader.innerText = `目前位置: ${currentPath}`;
+            fileListContainer.appendChild(pathHeader);
+            if (files.length === 0) {
+                const emptyMsg = document.createElement('div');
+                emptyMsg.innerText = '此目錄是空的';
+                fileListContainer.appendChild(emptyMsg);
+                return;
+            }
+            files.forEach(file => {
+                const item = document.createElement('div');
+                item.className = 'file-item';
+                item.innerHTML = `<span class="icon">${file.isDir ? '📁' : '📄'}</span> ${file.name}`;
+
+                const fullPath = currentPath === '/' ? `/${file.name}` : `${currentPath}/${file.name}`;
+
+                item.onclick = () => {
+                    if (file.isDir) {
+                        requestLS(fullPath);
+                    } else {
+                        alert(`選取了檔案: ${file.name}`);
+                    }
+                };
+
+                // 新增：右鍵點擊監聽
+                item.oncontextmenu = (e) => {
+                    e.preventDefault();
+                    selectedFileAction = { ...file, path: fullPath };
+                    showContextMenu(e.pageX, e.pageY);
+                };
+
+                fileListContainer.appendChild(item);
+            });
+        }
+
+        function requestLS(path) {
+            console.log(`正在請求目錄列表: ${path}`);
+            currentPath = path; // 更新當前路徑記錄
+            // UI 反饋：顯示讀取中並清空舊列表
+            fileListContainer.innerHTML = '<div style="color: blue;">正在獲取遠端目錄資料...</div>';
+            // 重置進度條，避免誤導
+            progressBar.style.width = '0%';
+            // 確保進度條容器在請求目錄時是隱藏的
+            progressBarContainer.style.display = 'none';
+
+            // 送出前先檢查連線是否建立且開啟
+            if (dataChannel && dataChannel.readyState === 'open') {
+                const lsCommandObject = { type: 'LS', path: path };
+                // 步驟 2: 將 LS 指令物件轉換為 JSON 字串
+                const lsJsonString = JSON.stringify(lsCommandObject);
+                       // 步驟 3: 建立外部的 chat 訊息物件，將 lsJsonString 作為其 text 內容
+                const chatMessageObject = { type: 'chat', text: lsJsonString };
+                // 步驟 4: 將外部 chat 訊息物件轉換為最終要發送的 JSON 字串
+                const finalJsonString = JSON.stringify(chatMessageObject);
+                // console.log 看到的是 JS Object (無引號)，jsonString 才是真正的 JSON (有雙引號)
+                console.log('發送指令 (Object):', finalJsonString);
+                
+                dataChannel.send(finalJsonString);
+    
+                appendMessage('系統指令', `請求目錄: ${path}`);
+                console.log('LS 指令已成功發送。'); // 確認指令已發送
+            } else {
+                console.error('Data Channel 未建立或尚未開啟，無法發送請求。');
+                alert('連線尚未建立，請先加入房間並等待 P2P 連線成功。');
+                fileListContainer.innerHTML = '連線尚未建立，無法獲取目錄。'; // 在 UI 中顯示錯誤訊息
+            }
+        }
+
+        function showContextMenu(x, y) {
+            contextMenu.style.display = 'block';
+            contextMenu.style.left = `${x}px`;
+            contextMenu.style.top = `${y}px`;
+        }
+
+        function hideContextMenu() {
+            contextMenu.style.display = 'none';
+        }
+
+        // 點擊頁面其他地方隱藏選單
+        document.addEventListener('click', hideContextMenu);
+
+        document.getElementById('menu-delete').onclick = () => {
+            if (!selectedFileAction) return;
+            if (confirm(`確定要刪除 ${selectedFileAction.name} 嗎？`)) {
+                sendFsCommand('DELETE', selectedFileAction.path);
+                // 延遲 500ms 後刷新列表，確保遠端已完成刪除
+                setTimeout(() => requestLS(currentPath), 500);
+            }
+            hideContextMenu();
+        };
+
+        document.getElementById('menu-rename').onclick = () => {
+            if (!selectedFileAction) return;
+            const oldName = selectedFileAction.name;
+            const newName = prompt(`請輸入 ${selectedFileAction.name} 的新名稱:`, selectedFileAction.name);
+            if (newName && newName !== selectedFileAction.name) {
+                sendFsCommand('RENAME', currentPath, { old : oldName, new : newName });
+                // 延遲 500ms 後刷新列表
+                setTimeout(() => requestLS(currentPath), 500);
+            }
+            hideContextMenu();
+        };
+
+        function sendFsCommand(type, path, extra = {}) {
+            if (dataChannel && dataChannel.readyState === 'open') {
+                const cmd = { type: type, path: path, ...extra };
+                const chatMsg = { type: 'chat', text: JSON.stringify(cmd) };
+                dataChannel.send(JSON.stringify(chatMsg));
+                appendMessage('系統指令', `執行 ${type}: ${path}`);
+            } else {
+                alert('連線中斷，無法執行指令');
+            }
+        }
+
+        refreshFsBtn.onclick = () => {
+            console.log('重新整理目錄按鈕被點擊'); // 追蹤按鈕點擊事件
+            requestLS(currentPath);
+        };
+        backFsBtn.onclick = () => {
+            if (currentPath === '/') {
+                alert('已在根目錄');
+                return;
+            }
+            // 計算上一層路徑
+            const parts = currentPath.split('/').filter(Boolean);
+            parts.pop();
+            const parentPath = '/' + parts.join('/');
+            requestLS(parentPath);
+        };
+
+
+        function appendMessage(sender, text) {
+            const messageElement = document.createElement('div');
+            messageElement.textContent = `${sender}: ${text}`;
+            chatBox.appendChild(messageElement);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        sendBtn.onclick = () => {
+            const text = chatInput.value;
+            if (text && dataChannel && dataChannel.readyState === 'open') {
+                const message = { type: 'chat', text: text };
+                dataChannel.send(JSON.stringify(message));
+                appendMessage('你', text);
+                chatInput.value = '';
+            }
+        };
+
+        // 檔案傳輸邏輯與 sender 端完全相同
+        fileInput.onchange = () => {
+            const file = fileInput.files[0];
+            if (!file || !dataChannel || dataChannel.readyState !== 'open') return;
+
+            appendMessage('系統', `開始傳送檔案: ${file.name}`);
+            // 傳送檔案資訊，並包含目標路徑
+            dataChannel.send(JSON.stringify({ 
+                type: 'file-meta', 
+                name: file.name, 
+                size: file.size,
+                path: currentPath 
+            }));
+
+            const chunkSize = 16384; // 16KB
+            let offset = 0;
+
+            const sendChunk = () => {
+                // 檢查緩衝區是否已滿。設定一個 1MB 的安全閾值。
+                const bufferFullThreshold = 1024 * 1024;
+                if (dataChannel.bufferedAmount > bufferFullThreshold) {
+                    // 等待緩衝區排空。
+                    dataChannel.onbufferedamountlow = () => {
+                        dataChannel.onbufferedamountlow = null; // 使用一次性監聽器
+                        sendChunk();
+                    };
+                    return; // 暫停傳送
+                }
+
+                if (offset >= file.size) {
+                    dataChannel.send(JSON.stringify({ type: 'file-end' }));
+                    appendMessage('系統', `檔案 ${file.name} 傳送完成。`);
+                    // 傳送完成後，延遲刷新列表以確認檔案已出現在遠端
+                    setTimeout(() => requestLS(currentPath), 1000);
+                    return;
+                }
+
+                const slice = file.slice(offset, offset + chunkSize);
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        dataChannel.send(e.target.result);
+                        offset += e.target.result.byteLength;
+                        sendChunk(); // 繼續傳送下一個區塊
+                    } catch (error) {
+                        console.error('Failed to send file chunk:', error);
+                        appendMessage('系統', `檔案傳送失敗: ${error.message}`);
+                    }
+                };
+                reader.readAsArrayBuffer(slice);
+            };
+
+            // 開始傳送流程
+            sendChunk();
+        };
+
+        function createDownloadLink(blob, fileName) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            a.textContent = `下載 ${fileName}`;
+            document.getElementById('download-area').appendChild(a);
+        }
+        function enableChatAndFileTransfer() {
+            chatInput.disabled = false;
+            sendBtn.disabled = false;
+            fileInput.disabled = false;
+            refreshFsBtn.disabled = false;
+             backFsBtn.disabled = false;
+        }
+
+        function disableChatAndFileTransfer() {
+            chatInput.disabled = true;
+            sendBtn.disabled = true;
+            fileInput.disabled = true;
+            refreshFsBtn.disabled = true;
+             backFsBtn.disabled = true;
+        }
+
+    </script>
+</body>
+</html>
