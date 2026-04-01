@@ -16,7 +16,7 @@
         .file-item { cursor: pointer; padding: 5px; border-bottom: 1px dashed #eee; display: flex; align-items: center; }
         .file-item:hover { background-color: #f0f0f0; }
         .icon { margin-right: 10px; }
-        #backFsBtn, #refreshFsBtn { margin: 5px 2px; padding: 8px 12px; }
+        #backFsBtn, #refreshFsBtn, #mkdirBtn { margin: 5px 2px; padding: 8px 12px; }
         /* 右鍵選單樣式 */
         #context-menu {
             position: absolute;
@@ -85,6 +85,7 @@
         const fileInput = document.getElementById('fileInput');
         const refreshFsBtn = document.getElementById('refreshFsBtn');
          const backFsBtn = document.createElement('button');
+        const mkdirBtn = document.createElement('button');
         const fileListContainer = document.getElementById('fileList');
         const progressBar = document.getElementById('progress'); // 內層進度條
         const progressBarContainer = document.getElementById('progress-bar'); // 外層進度條容器
@@ -119,6 +120,11 @@
         backFsBtn.innerText = '回到上一層';
         backFsBtn.disabled = true;
         refreshFsBtn.parentNode.insertBefore(backFsBtn, fileListContainer);
+
+        mkdirBtn.id = 'mkdirBtn';
+        mkdirBtn.innerText = '建立新目錄';
+        mkdirBtn.disabled = true;
+        refreshFsBtn.parentNode.insertBefore(mkdirBtn, fileListContainer);
 
         // 點擊 "檢查房間" 按鈕
         checkRoomBtn.onclick = () => {
@@ -462,6 +468,14 @@
             const parentPath = '/' + parts.join('/');
             requestLS(parentPath);
         };
+        mkdirBtn.onclick = () => {
+            const dirName = prompt('請輸入新目錄名稱:');
+            if (dirName) {
+                sendFsCommand('MKDIR', currentPath, { name: dirName });
+                // 延遲 500ms 後刷新列表
+                setTimeout(() => requestLS(currentPath), 500);
+            }
+        };
 
 
         function appendMessage(sender, text) {
@@ -616,6 +630,7 @@
             fileInput.disabled = false;
             refreshFsBtn.disabled = false;
              backFsBtn.disabled = false;
+             mkdirBtn.disabled = false;
         }
 
         function disableChatAndFileTransfer() {
@@ -624,6 +639,7 @@
             fileInput.disabled = true;
             refreshFsBtn.disabled = true;
              backFsBtn.disabled = true;
+             mkdirBtn.disabled = true;
         }
 
     </script>
