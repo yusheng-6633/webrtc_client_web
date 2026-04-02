@@ -13,9 +13,20 @@
         #progress-bar { width: 100%; background-color: #f0f0f0; border-radius: 5px; height: 20px; margin-top: 5px; display: none; }
         /* 檔案瀏覽器樣式 */
         #file-browser { margin-top: 2em; border: 1px solid #ddd; padding: 10px; border-radius: 5px; }
-        .file-item { cursor: pointer; padding: 5px; border-bottom: 1px dashed #eee; display: flex; align-items: center; }
-        .file-item:hover { background-color: #f0f0f0; }
-        .icon { margin-right: 10px; }
+        #fileList { display: flex; flex-wrap: wrap; gap: 15px; margin-top: 10px; }
+        .file-item { 
+            width: 120px; cursor: pointer; padding: 10px; border: 1px solid #eee; 
+            border-radius: 8px; display: flex; flex-direction: column; align-items: center; 
+            text-align: center; transition: background 0.2s; 
+        }
+        .file-item:hover { background-color: #f0f0f0; border-color: #ccc; }
+        .thumbnail { 
+            width: 100px; height: 100px; background-color: #f9f9f9; 
+            display: flex; align-items: center; justify-content: center; 
+            font-size: 2em; margin-bottom: 8px; border-radius: 4px; overflow: hidden;
+        }
+        .thumbnail img { width: 100%; height: 100%; object-fit: cover; }
+        .file-name { font-size: 0.85em; word-break: break-all; max-height: 2.4em; overflow: hidden; }
         #backFsBtn, #refreshFsBtn, #mkdirBtn { margin: 5px 2px; padding: 8px 12px; }
         /* 右鍵選單樣式 */
         #context-menu {
@@ -35,18 +46,19 @@
     <h1>WebRTC P2P 接收端 (Receiver)</h1>
     <label for="signalingServerUrl">信令伺服器 URL:</label>
     <input type="text" id="signalingServerUrl" placeholder="例如: https://your-app.onrender.com" value="https://webrtc-signaling-server-v1c9.onrender.com" style="width: 300px;" />
-    <input type="text" id="roomName" value="control" placeholder="輸入房間名稱" />
+    <input type="text" id="roomName" value="control" placeholder="輸入房間名稱" readonly />
     <button id="checkRoomBtn">檢查房間</button>
     <button id="joinRoomBtn">加入房間</button>
     <hr>
     <div class="container">
         <div class="chat-container">
-            <h2>P2P 聊天室</h2>
-            <div id="chatBox"></div>
-            <input type="text" id="chatInput" placeholder="輸入訊息..." disabled />
-            <button id="sendBtn" disabled>傳送</button>
+            <h2 style="display: none;">P2P 聊天室</h2>
+            <div id="chatBox" style="display: none;"></div>
+            <input type="text" id="chatInput" placeholder="輸入訊息..." disabled style="display: none;" />
+            <button id="sendBtn" disabled style="display: none;">傳送</button>
             <div id="file-transfer-container">
-                <input type="file" id="fileInput" disabled multiple>
+                <p style="margin: 10px 0 5px; font-size: 0.9em; color: #666;">💡 提示：選擇檔案後將自動上傳至目前的遠端目錄</p>
+                <input type="file" id="fileInput" disabled multiple title="點擊選擇要上傳的檔案">
                 <div id="download-area"></div>
                 <div id="file-status" style="margin-top: 10px; font-size: 0.85em; color: #555;"></div>
                 <div id="progress-bar" style="width: 100%; background-color: #f0f0f0; border-radius: 5px; height: 20px; margin-top: 5px; display: none;">
@@ -69,6 +81,7 @@
     <div id="context-menu">
         <div id="menu-rename">更名</div>
         <div id="menu-delete">刪除</div>
+        <div id="menu-download">下載</div>
     </div>
 
     <!-- 引入 Socket.IO 客戶端庫 -->
@@ -98,7 +111,9 @@
         let peerConnection;
         let dataChannel;
         let roomName;
-        let currentPath = '/'; // 追蹤目前目錄路徑
+        let currentPath = '/';   // 追蹤目前目錄路徑
+        let currentPage = 1;     // 追蹤目前頁碼
+        let totalPages = 1;      // 追蹤總頁數
         let selectedFileAction = null; // 紀錄目前右鍵點擊的檔案資訊
 
         // --- 續傳狀態管理 ---
@@ -265,13 +280,13 @@
             dataChannel.onopen = () => {
                 console.log("Data Channel 已開啟");
                 appendMessage('系統', 'P2P 連線已建立！');
-                fileListContainer.innerText = '連線成功！請點擊上方按鈕獲取目錄列表。';
                 
                 if (isTransferring) {
                     appendMessage('系統', '檢測到中斷的傳送任務，正在嘗試自動續傳...');
                     sendNextFile(); 
                 }
                 enableChatAndFileTransfer();
+                requestLS(currentPath, 1); // 連線建立後自動取得遠端檔案列表，預設第一頁
             };
             dataChannel.onclose = () => {
                 console.log("Data Channel 已關閉");
@@ -289,15 +304,14 @@
                     try {
                         const message = JSON.parse(event.data);
                         if (message.type === 'chat') {
-                            appendMessage('對方', message.text);
-                                // 分析 text 內容是否為 JSON 格式的檔案列表回應 (ACK)
                             try {
                                 const inner = JSON.parse(message.text);
                                 if (inner.status === 'OK' && Array.isArray(inner.data)) {
-                                    console.log('從聊天訊息中解析出檔案列表回應');
-                                    renderFileList(inner.data);
+                                    renderFileList(inner);
+                                    return; // 成功處理指令，不再將其視為普通聊天訊息
                                 }
-                            } catch (innerError) { /* 普通聊天訊息，不做處理 */ }
+                            } catch (innerError) { /* 普通聊天訊息，繼續往下走 */ }
+                            appendMessage('對方', message.text);
                         } else if (message.type === 'file-meta') {
                             fileMeta = message;
                             receivedBuffers = [];
@@ -310,9 +324,6 @@
                             createDownloadLink(receivedFile, fileMeta.name);
                             receivedBuffers = [];
                             progressBar.style.width = '100%';
-                        } else if (message.status === 'OK' && message.data) {
-                            // 處理遠端檔案列表回傳
-                            renderFileList(message.data);
                         }
                     } catch (e) { // Fallback for simple text
                         appendMessage('對方', event.data);
@@ -333,25 +344,66 @@
             };
         }
 
-        function renderFileList(files) {
+        function renderFileList(response) { // 現在接受包含分頁資訊的 response 物件
             fileListContainer.innerHTML = '';
+
+            const files = response.data; // 從 response 中提取檔案列表
+            currentPage = response.currentPage; // 更新當前頁碼
+            totalPages = response.totalPages;   // 更新總頁數
+            // 排序邏輯：資料夾排在前面，再依照名稱排序
+            files.sort((a, b) => {
+                if (a.isDir !== b.isDir) {
+                    return a.isDir ? -1 : 1;
+                }
+                return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+            });
+
             // 顯示目前路徑
             const pathHeader = document.createElement('div');
             pathHeader.style.padding = '5px';
             pathHeader.style.fontWeight = 'bold';
             pathHeader.style.backgroundColor = '#eee';
-            pathHeader.innerText = `目前位置: ${currentPath}`;
+            pathHeader.style.width = '100%'; // 佔滿整列
+            pathHeader.style.marginBottom = '10px';
+            pathHeader.innerText = `目前位置: ${currentPath} (頁碼: ${currentPage}/${totalPages})`; // 顯示頁碼資訊
             fileListContainer.appendChild(pathHeader);
+
             if (files.length === 0) {
                 const emptyMsg = document.createElement('div');
-                emptyMsg.innerText = '此目錄是空的';
+                emptyMsg.style.width = '100%';
+                emptyMsg.innerText = (currentPage === 1 && totalPages === 1) ? '此目錄是空的' : '此頁沒有檔案';
                 fileListContainer.appendChild(emptyMsg);
-                return;
+                // 不在此處 return，以便在有多頁時仍能顯示分頁控制項
             }
+
             files.forEach(file => {
+                console.log('--- Processing file:', file.name, '---');
+                console.log('File object:', file);
+                // 判斷是否為常見圖片格式
+                const isImage = !file.isDir && file.name.match(/\.(jpg|jpeg|png|gif|webp|bmp)$/i);
+                console.log('isImage (match result):', isImage);
+                console.log('file.thumbnail:', file.thumbnail);
+                
                 const item = document.createElement('div');
                 item.className = 'file-item';
-                item.innerHTML = `<span class="icon">${file.isDir ? '📁' : '📄'}</span> ${file.name}`;
+                
+                // 處理縮圖數據：確保有 data:image 前綴
+                let thumbSrc = file.thumbnail;
+                if (thumbSrc && !thumbSrc.startsWith('data:')) {
+                    thumbSrc = `data:image/jpeg;base64,${thumbSrc}`;
+                }
+
+                const icon = file.isDir ? '📁' : (isImage ? '🖼️' : '📄');
+                const thumbContent = (isImage && thumbSrc) 
+                    ? `<img src="${thumbSrc}" alt="${file.name}">` 
+                    : icon;
+                console.log('Determined icon:', icon);
+                console.log('Thumbnail content:', thumbContent);
+
+                item.innerHTML = `
+                    <div class="thumbnail">${thumbContent}</div>
+                    <div class="file-name">${file.name}</div>
+                `;
 
                 const fullPath = currentPath === '/' ? `/${file.name}` : `${currentPath}/${file.name}`;
 
@@ -359,8 +411,31 @@
                     if (file.isDir) {
                         requestLS(fullPath);
                     } else {
-                        alert(`選取了檔案: ${file.name}`);
+                        // alert(`選取了檔案: ${file.name}`); // 暫時移除，避免干擾
                     }
+                };
+
+                // 雙擊進入資料夾
+                item.ondblclick = () => {
+                    if (file.isDir) {
+                        requestLS(fullPath, 1); // 雙擊進入資料夾，重置到第一頁
+                    }
+                };
+
+                // 處理單擊事件，用於選中檔案
+                item.onclick = (e) => {
+                    // 移除所有已選中的樣式
+                    document.querySelectorAll('.file-item.selected').forEach(el => {
+                        el.classList.remove('selected');
+                    });
+                    // 為當前點擊的項目添加選中樣式
+                    item.classList.add('selected');
+                    selectedFileAction = { ...file, path: fullPath };
+                    // 如果是資料夾，單擊不觸發進入，留給雙擊
+                    if (!file.isDir) {
+                        // alert(`選取了檔案: ${file.name}`); // 可以在這裡處理單擊檔案的邏輯
+                    }
+                    hideContextMenu(); // 單擊後隱藏右鍵選單
                 };
 
                 // 新增：右鍵點擊監聽
@@ -372,11 +447,39 @@
 
                 fileListContainer.appendChild(item);
             });
+
+            // 渲染分頁控制項
+            if (totalPages > 1) {
+                const paginationDiv = document.createElement('div');
+                paginationDiv.style.width = '100%';
+                paginationDiv.style.marginTop = '20px';
+                paginationDiv.style.textAlign = 'center';
+
+                const prevBtn = document.createElement('button');
+                prevBtn.innerText = '上一頁';
+                prevBtn.disabled = currentPage === 1;
+                prevBtn.onclick = () => requestLS(currentPath, currentPage - 1);
+                paginationDiv.appendChild(prevBtn);
+
+                const pageInfo = document.createElement('span');
+                pageInfo.innerText = ` ${currentPage} / ${totalPages} `;
+                pageInfo.style.margin = '0 10px';
+                paginationDiv.appendChild(pageInfo);
+
+                const nextBtn = document.createElement('button');
+                nextBtn.innerText = '下一頁';
+                nextBtn.disabled = currentPage === totalPages;
+                nextBtn.onclick = () => requestLS(currentPath, currentPage + 1);
+                paginationDiv.appendChild(nextBtn);
+
+                fileListContainer.appendChild(paginationDiv);
+            }
         }
 
-        function requestLS(path) {
-            console.log(`正在請求目錄列表: ${path}`);
+        function requestLS(path, page = 1) { // 增加 page 參數，預設為 1
+            console.log(`正在請求目錄列表: ${path}, 頁碼: ${page}`);
             currentPath = path; // 更新當前路徑記錄
+            currentPage = page; // 更新當前頁碼記錄
             // UI 反饋：顯示讀取中並清空舊列表
             fileListContainer.innerHTML = '<div style="color: blue;">正在獲取遠端目錄資料...</div>';
             // 重置進度條，避免誤導
@@ -386,7 +489,7 @@
 
             // 送出前先檢查連線是否建立且開啟
             if (dataChannel && dataChannel.readyState === 'open') {
-                const lsCommandObject = { type: 'LS', path: path };
+                const lsCommandObject = { type: 'LS', path: path, currentPage: page }; // 包含 currentPage
                 // 步驟 2: 將 LS 指令物件轉換為 JSON 字串
                 const lsJsonString = JSON.stringify(lsCommandObject);
                        // 步驟 3: 建立外部的 chat 訊息物件，將 lsJsonString 作為其 text 內容
@@ -424,8 +527,8 @@
             if (!selectedFileAction) return;
             if (confirm(`確定要刪除 ${selectedFileAction.name} 嗎？`)) {
                 sendFsCommand('DELETE', selectedFileAction.path);
-                // 延遲 500ms 後刷新列表，確保遠端已完成刪除
-                setTimeout(() => requestLS(currentPath), 500);
+                // 延遲 500ms 後刷新列表，嘗試保持在當前頁
+                setTimeout(() => requestLS(currentPath, currentPage), 500);
             }
             hideContextMenu();
         };
@@ -436,8 +539,22 @@
             const newName = prompt(`請輸入 ${selectedFileAction.name} 的新名稱:`, selectedFileAction.name);
             if (newName && newName !== selectedFileAction.name) {
                 sendFsCommand('RENAME', currentPath, { old : oldName, new : newName });
-                // 延遲 500ms 後刷新列表
-                setTimeout(() => requestLS(currentPath), 500);
+                // 延遲 500ms 後刷新列表，嘗試保持在當前頁
+                setTimeout(() => requestLS(currentPath, currentPage), 500);
+            }
+            hideContextMenu();
+        };
+
+        document.getElementById('menu-download').onclick = () => {
+            if (!selectedFileAction) return;
+            if (selectedFileAction.isDir) {
+                alert('無法下載目錄，請選擇檔案。');
+                hideContextMenu();
+                return;
+            }
+            if (confirm(`確定要下載 ${selectedFileAction.name} 嗎？`)) {
+                // 發送 DOWNLOAD 指令，path 為當前目錄，target 為檔案名稱
+                sendFsCommand('DOWNLOAD', currentPath, { target: selectedFileAction.name });
             }
             hideContextMenu();
         };
@@ -455,7 +572,7 @@
 
         refreshFsBtn.onclick = () => {
             console.log('重新整理目錄按鈕被點擊'); // 追蹤按鈕點擊事件
-            requestLS(currentPath);
+            requestLS(currentPath, currentPage); // 刷新當前頁
         };
         backFsBtn.onclick = () => {
             if (currentPath === '/') {
@@ -465,8 +582,8 @@
             // 計算上一層路徑
             const parts = currentPath.split('/').filter(Boolean);
             parts.pop();
-            const parentPath = '/' + parts.join('/');
-            requestLS(parentPath);
+            const parentPath = '/' + parts.join('/'); // 回到上一層，重置到第一頁
+            requestLS(parentPath, 1);
         };
         mkdirBtn.onclick = () => {
             let dirName = prompt('請輸入新目錄名稱:');
@@ -489,8 +606,8 @@
             }
 
             sendFsCommand('MKDIR', currentPath, { name: dirName });
-            // 延遲 500ms 後刷新列表
-            setTimeout(() => requestLS(currentPath), 500);
+            // 延遲 500ms 後刷新列表，嘗試保持在當前頁
+            setTimeout(() => requestLS(currentPath, currentPage), 500);
         };
 
 
@@ -620,7 +737,7 @@
                                 progressBar.style.width = filePercent + '%';
 
                             sendChunk(); // 繼續傳送目前檔案的下一個區塊
-                        } catch (error) {
+                        } catch (error) { // 這裡的 error 可能是 DataChannel 關閉導致的
                             // 注意：此處錯誤通常代表連線已斷，sendNextFile 會在 onopen 重新觸發
                                 handleFailure(file.name, error.message);
                         }
