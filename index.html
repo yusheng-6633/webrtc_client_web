@@ -46,9 +46,8 @@
     <h1>WebRTC P2P 接收端 (Receiver)</h1>
     <label for="signalingServerUrl">信令伺服器 URL:</label>
     <input type="text" id="signalingServerUrl" placeholder="例如: https://your-app.onrender.com" value="https://webrtc-signaling-server-v1c9.onrender.com" style="width: 300px;" />
-    <input type="text" id="roomName" value="control" placeholder="輸入房間名稱" readonly />
-    <button id="checkRoomBtn">檢查房間</button>
-    <button id="joinRoomBtn">加入房間</button>
+    <button id="connectBtn">連線</button>
+    <button id="disconnectBtn" disabled>斷線</button>
     <hr>
     <div class="container">
         <div class="chat-container">
@@ -89,15 +88,14 @@
     <script>
         let socket; // 將 socket 宣告為 let，以便後續重新賦值
         const signalingServerUrlInput = document.getElementById('signalingServerUrl');
-        const checkRoomBtn = document.getElementById('checkRoomBtn');
-        const joinRoomBtn = document.getElementById('joinRoomBtn');
-        const roomNameInput = document.getElementById('roomName');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
         const chatBox = document.getElementById('chatBox');
         const chatInput = document.getElementById('chatInput');
         const sendBtn = document.getElementById('sendBtn');
         const fileInput = document.getElementById('fileInput');
         const refreshFsBtn = document.getElementById('refreshFsBtn');
-         const backFsBtn = document.createElement('button');
+        const backFsBtn = document.createElement('button');
         const mkdirBtn = document.createElement('button');
         const fileListContainer = document.getElementById('fileList');
         const progressBar = document.getElementById('progress'); // 內層進度條
@@ -111,12 +109,15 @@
         let peerConnection;
         let dataChannel;
         let roomName;
+        const targetRooms = ['control','control1', 'control2', 'control3'];
+        let currentCheckingIndex = 0;
         let currentPath = '/';   // 追蹤目前目錄路徑
         let currentPage = 1;     // 追蹤目前頁碼
         let totalPages = 1;      // 追蹤總頁數
         let selectedFileAction = null; // 紀錄目前右鍵點擊的檔案資訊
 
         // --- 續傳狀態管理 ---
+        let isConnecting = false;
         let transferQueue = [];     // 儲存待傳送的 File 物件陣列
         let currentFileIndex = 0;   // 目前處理到第幾個檔案
         let currentOffset = 0;      // 目前檔案已傳送的位元組數
@@ -141,13 +142,15 @@
         mkdirBtn.disabled = true;
         refreshFsBtn.parentNode.insertBefore(mkdirBtn, fileListContainer);
 
-        // 點擊 "檢查房間" 按鈕
-        checkRoomBtn.onclick = () => {
-            const roomToCheck = roomNameInput.value;
-            if (roomToCheck === '') {
-                alert('請輸入要檢查的房間名稱');
-                return;
-            }
+        // 點擊 "連線" 按鈕
+        connectBtn.onclick = () => {
+            if (isConnecting) return;
+            
+            isConnecting = true;
+            connectBtn.disabled = true;
+            disconnectBtn.disabled = true; // 尋找房間階段，連線尚未成功，斷線按鈕禁用
+            currentCheckingIndex = 0;
+            fileListContainer.innerText = '正在尋找可用房間...';
 
             // 如果 socket 尚未連線，則建立連線
             if (!socket || !socket.connected) {
@@ -157,41 +160,49 @@
 
             // 等待連線成功後再發送事件
             if (socket.connected) {
-                socket.emit('check room', roomToCheck);
+                checkNextRoom();
             } else {
                 socket.once('connect', () => {
-                    socket.emit('check room', roomToCheck);
+                    checkNextRoom();
                 });
             }
         };
 
-        // 點擊 "加入房間" 按鈕
-        joinRoomBtn.onclick = () => {
-            roomName = roomNameInput.value;
-            if (roomName === '') {
-                alert('請輸入房間名稱');
-                return;
-            }
-
-            // 如果 socket 尚未連線，則建立連線
-            if (!socket || !socket.connected) {
-                socket = io(signalingServerUrlInput.value);
-                setupSocketListeners(socket);
-            }
-
-            // 等待連線成功後再發送事件
-            if (socket.connected) {
-                emitJoin();
-            } else {
-                socket.once('connect', emitJoin);
-            }
+        // 點擊 "斷線" 按鈕
+        disconnectBtn.onclick = () => {
+            if (dataChannel) dataChannel.close();
+            if (peerConnection) peerConnection.close();
+            if (socket) socket.disconnect();
+            
+            peerConnection = null;
+            dataChannel = null;
+            roomName = null;
+            isConnecting = false;
+            
+            connectBtn.disabled = false;
+            disconnectBtn.disabled = true;
+            disableChatAndFileTransfer();
+            fileListContainer.innerText = '已斷開連線。';
+            appendMessage('系統', '連線已手動中斷。');
         };
 
-        function emitJoin() {
-            joinRoomBtn.disabled = true;
-            roomNameInput.disabled = true;
+        function checkNextRoom() {
+            if (currentCheckingIndex < targetRooms.length) {
+                const roomToTry = targetRooms[currentCheckingIndex];
+                console.log(`正在檢查房間: ${roomToTry}`);
+                socket.emit('check room', roomToTry);
+            } else {
+                alert('目前沒有可加入的房間 (control1, control2, control3 均無人或已滿)');
+                isConnecting = false;
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                fileListContainer.innerText = '連線失敗：找不到可用房間';
+            }
+        }
+
+        function emitJoin(targetRoom) {
             // 向伺服器發送 'join' 事件
-            socket.emit('join', roomName);
+            socket.emit('join', targetRoom);
         }
 
         // 將所有 Socket.IO 事件監聽器封裝在一個函數中
@@ -203,26 +214,37 @@
             socketInstance.on('full', (room) => {
                 console.log(`房間 ${room} 已滿。`);
                 alert(`房間 ${room} 已滿。`);
-                // 加入失敗，重新啟用 UI 讓使用者重試
-                joinRoomBtn.disabled = false;
-                roomNameInput.disabled = false;
+                isConnecting = false;
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
             });
 
             // 新增：處理伺服器回傳 'room not found' 的情況
             socketInstance.on('absence', (room) => {
                 console.log(`Room '${room}' not found.`);
-                alert(`房間 '${room}' 不存在，無法加入。請確認房間名稱是否正確。`);
-                // 加入失敗，重新啟用 UI 讓使用者重試
-                joinRoomBtn.disabled = false;
-                roomNameInput.disabled = false;
+                // 繼續檢查下一個房間
+                currentCheckingIndex++;
+                checkNextRoom();
+            });
+            
+            // 處理 Socket 斷開的情況
+            socketInstance.on('disconnect', () => {
+                console.log('信令伺服器連線斷開');
+                isConnecting = false;
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
             });
 
             socketInstance.on('room status', (status) => {
-                // 假設伺服器回傳的 status 物件格式為 { room: 'roomName', exists: true, clientCount: 1 }
-                if (status.exists) {
-                    alert(`房間 '${status.room}' 已存在，目前有 ${status.clientCount} 人。`);
+                // 如果房間存在且只有一個人 (Sender)，就加入
+                if (status.exists && status.clientCount === 1) {
+                    console.log(`找到可用房間: ${status.room}，正在加入...`);
+                    roomName = status.room;
+                    emitJoin(status.room);
                 } else {
-                    alert(`房間 '${status.room}' 不存在，您可以建立它。`);
+                    // 房間不存在、已滿、或為空，檢查下一個
+                    currentCheckingIndex++;
+                    checkNextRoom();
                 }
             });
 
@@ -279,6 +301,11 @@
         function setupDataChannel() {
             dataChannel.onopen = () => {
                 console.log("Data Channel 已開啟");
+                isConnecting = false; 
+                // 只有在 DataChannel 開啟後，才算真正連線成功
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                
                 appendMessage('系統', 'P2P 連線已建立！');
                 
                 if (isTransferring) {
@@ -291,6 +318,10 @@
             dataChannel.onclose = () => {
                 console.log("Data Channel 已關閉");
                 appendMessage('系統', 'P2P 連線已中斷。');
+                // 連線中斷後，恢復按鈕狀態
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                isConnecting = false;
                 fileListContainer.innerText = '尚未連線...';
                 disableChatAndFileTransfer();
             };
