@@ -48,6 +48,7 @@
     <input type="text" id="signalingServerUrl" placeholder="例如: https://your-app.onrender.com" value="https://webrtc-signaling-server-v1c9.onrender.com" style="width: 300px;" />
     <button id="connectBtn">連線</button>
     <button id="disconnectBtn" disabled>斷線</button>
+    <span id="currentRoomDisplay" style="margin-left: 10px; font-weight: bold; color: #2196F3;"></span>
     <hr>
     <div class="container">
         <div class="chat-container">
@@ -105,6 +106,7 @@
         const fileStatusLabel = document.getElementById('file-status');
         const totalStatusLabel = document.getElementById('total-status');
         const contextMenu = document.getElementById('context-menu');
+        const currentRoomDisplay = document.getElementById('currentRoomDisplay');
 
         let peerConnection;
         let dataChannel;
@@ -113,6 +115,7 @@
         let currentCheckingIndex = 0;
         let currentPath = '/';   // 追蹤目前目錄路徑
         let currentPage = 1;     // 追蹤目前頁碼
+        let roomSearchLogs = []; // 紀錄每個房間的檢查結果
         let totalPages = 1;      // 追蹤總頁數
         let selectedFileAction = null; // 紀錄目前右鍵點擊的檔案資訊
 
@@ -150,6 +153,7 @@
             connectBtn.disabled = true;
             disconnectBtn.disabled = true; // 尋找房間階段，連線尚未成功，斷線按鈕禁用
             currentCheckingIndex = 0;
+            roomSearchLogs = [];
             fileListContainer.innerText = '正在尋找可用房間...';
 
             // 如果 socket 尚未連線，則建立連線
@@ -182,6 +186,7 @@
             connectBtn.disabled = false;
             disconnectBtn.disabled = true;
             disableChatAndFileTransfer();
+            currentRoomDisplay.innerText = '';
             fileListContainer.innerText = '已斷開連線。';
             appendMessage('系統', '連線已手動中斷。');
         };
@@ -192,7 +197,8 @@
                 console.log(`正在檢查房間: ${roomToTry}`);
                 socket.emit('check room', roomToTry);
             } else {
-                alert('目前沒有可加入的房間 (control1, control2, control3 均無人或已滿)');
+                alert('連線失敗，請檢查下列房間狀態：\n\n' + roomSearchLogs.join('\n'));
+                currentRoomDisplay.innerText = '';
                 isConnecting = false;
                 connectBtn.disabled = false;
                 disconnectBtn.disabled = true;
@@ -222,6 +228,7 @@
             // 新增：處理伺服器回傳 'room not found' 的情況
             socketInstance.on('absence', (room) => {
                 console.log(`Room '${room}' not found.`);
+                roomSearchLogs.push(`- ${room}: 房間尚未建立 (不存在)`);
                 // 繼續檢查下一個房間
                 currentCheckingIndex++;
                 checkNextRoom();
@@ -231,6 +238,7 @@
             socketInstance.on('disconnect', () => {
                 console.log('信令伺服器連線斷開');
                 isConnecting = false;
+                currentRoomDisplay.innerText = '';
                 connectBtn.disabled = false;
                 disconnectBtn.disabled = true;
             });
@@ -240,9 +248,18 @@
                 if (status.exists && status.clientCount === 1) {
                     console.log(`找到可用房間: ${status.room}，正在加入...`);
                     roomName = status.room;
+                    currentRoomDisplay.innerText = `正在加入: ${roomName}...`;
                     emitJoin(status.room);
                 } else {
-                    // 房間不存在、已滿、或為空，檢查下一個
+                    // 區分具體原因
+                    let reason = "";
+                    if (!status.exists) reason = "房間尚未建立";
+                    else if (status.clientCount === 0) reason = "目前無人在線 (無 Sender)";
+                    else if (status.clientCount >= 2) reason = "房間已滿";
+                    else reason = "狀態未知";
+
+                    roomSearchLogs.push(`- ${status.room}: ${reason}`);
+                    
                     currentCheckingIndex++;
                     checkNextRoom();
                 }
@@ -305,6 +322,7 @@
                 // 只有在 DataChannel 開啟後，才算真正連線成功
                 connectBtn.disabled = true;
                 disconnectBtn.disabled = false;
+                currentRoomDisplay.innerText = `目前房間: ${roomName}`;
                 
                 appendMessage('系統', 'P2P 連線已建立！');
                 
@@ -322,6 +340,7 @@
                 connectBtn.disabled = false;
                 disconnectBtn.disabled = true;
                 isConnecting = false;
+                currentRoomDisplay.innerText = '';
                 fileListContainer.innerText = '尚未連線...';
                 disableChatAndFileTransfer();
             };
