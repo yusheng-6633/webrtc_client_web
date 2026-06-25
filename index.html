@@ -111,7 +111,7 @@
         let peerConnection;
         let dataChannel;
         let roomName;
-        const targetRooms = ['control','control1', 'control2', 'control3'];
+        let targetRooms = ['control','control1', 'control2', 'control3'];
         let currentCheckingIndex = 0;
         let currentPath = '/';   // 追蹤目前目錄路徑
         let currentPage = 1;     // 追蹤目前頁碼
@@ -824,6 +824,26 @@
              backFsBtn.disabled = true;
              mkdirBtn.disabled = true;
         }
+
+        // 檢查網址參數是否有指定房間或信令伺服器，若有則直接連線
+        (function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            let urlRoom = urlParams.get('room') || urlParams.get('roomName');
+            if (!urlRoom && window.location.hash) {
+                urlRoom = decodeURIComponent(window.location.hash.substring(1)).trim();
+            }
+            const urlServer = urlParams.get('server') || urlParams.get('signaling');
+            if (urlServer) {
+                signalingServerUrlInput.value = urlServer;
+                console.log(`從網址解析到信令伺服器 URL: ${urlServer}`);
+            }
+            if (urlRoom) {
+                targetRooms = [urlRoom];
+                console.log(`從網址解析到房間名稱: ${urlRoom}，正在嘗試自動連線...`);
+                // 自動觸發連線按鈕點擊
+                connectBtn.click();
+            }
+        })();
 
     </script>
 </body>
