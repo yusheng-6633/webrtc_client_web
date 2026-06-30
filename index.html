@@ -1,45 +1,139 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <title>WebRTC 接收端</title>
     <style>
-        body { font-family: sans-serif; padding: 1em; }
-        .container { max-width: 800px; margin: auto; }
-        .chat-container { flex: 1; }
-        #chatBox { height: 150px; border: 1px solid #ccc; overflow-y: scroll; padding: 5px; margin-bottom: 5px; background-color: #f9f9f9; }
-        #chatInput { width: calc(100% - 80px); padding: 5px; }
-        #sendBtn { padding: 5px 10px; }
-        #file-transfer-container { margin-top: 1em; }
-        #progress-bar { width: 100%; background-color: #f0f0f0; border-radius: 5px; height: 20px; margin-top: 5px; display: none; }
+        body {
+            font-family: sans-serif;
+            padding: 1em;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: auto;
+        }
+
+        .chat-container {
+            flex: 1;
+        }
+
+        #chatBox {
+            height: 150px;
+            border: 1px solid #ccc;
+            overflow-y: scroll;
+            padding: 5px;
+            margin-bottom: 5px;
+            background-color: #f9f9f9;
+        }
+
+        #chatInput {
+            width: calc(100% - 80px);
+            padding: 5px;
+        }
+
+        #sendBtn {
+            padding: 5px 10px;
+        }
+
+        #file-transfer-container {
+            margin-top: 1em;
+        }
+
+        #progress-bar {
+            width: 100%;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+            height: 20px;
+            margin-top: 5px;
+            display: none;
+        }
+
         /* 檔案瀏覽器樣式 */
-        #file-browser { margin-top: 2em; border: 1px solid #ddd; padding: 10px; border-radius: 5px; }
-        #fileList { display: flex; flex-wrap: wrap; gap: 15px; margin-top: 10px; }
-        .file-item { 
-            width: 120px; cursor: pointer; padding: 10px; border: 1px solid #eee; 
-            border-radius: 8px; display: flex; flex-direction: column; align-items: center; 
-            text-align: center; transition: background 0.2s; 
+        #file-browser {
+            margin-top: 2em;
+            border: 1px solid #ddd;
+            padding: 10px;
+            border-radius: 5px;
         }
-        .file-item:hover { background-color: #f0f0f0; border-color: #ccc; }
-        .thumbnail { 
-            width: 100px; height: 100px; background-color: #f9f9f9; 
-            display: flex; align-items: center; justify-content: center; 
-            font-size: 2em; margin-bottom: 8px; border-radius: 4px; overflow: hidden;
+
+        #fileList {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-top: 10px;
         }
-        .thumbnail img { width: 100%; height: 100%; object-fit: cover; }
-        .file-name { font-size: 0.85em; word-break: break-all; max-height: 2.4em; overflow: hidden; }
-        #backFsBtn, #refreshFsBtn, #mkdirBtn { margin: 5px 2px; padding: 8px 12px; }
+
+        .file-item {
+            width: 120px;
+            cursor: pointer;
+            padding: 10px;
+            border: 1px solid #eee;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            transition: background 0.2s;
+        }
+
+        .file-item:hover {
+            background-color: #f0f0f0;
+            border-color: #ccc;
+        }
+
+        .thumbnail {
+            width: 100px;
+            height: 100px;
+            background-color: #f9f9f9;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2em;
+            margin-bottom: 8px;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .thumbnail img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .file-name {
+            font-size: 0.85em;
+            word-break: break-all;
+            max-height: 2.4em;
+            overflow: hidden;
+        }
+
+        #backFsBtn,
+        #refreshFsBtn,
+        #mkdirBtn {
+            margin: 5px 2px;
+            padding: 8px 12px;
+        }
+
         /* 右鍵選單樣式 */
         #context-menu {
             position: absolute;
             display: none;
             background: white;
             border: 1px solid #ccc;
-            box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+            box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2);
             z-index: 1000;
             min-width: 120px;
         }
-        #context-menu div { padding: 8px 12px; cursor: pointer; }
-        #context-menu div:hover { background-color: #f0f0f0; }
+
+        #context-menu div {
+            padding: 8px 12px;
+            cursor: pointer;
+        }
+
+        #context-menu div:hover {
+            background-color: #f0f0f0;
+        }
 
         /* 特別模式樣式 */
         #simple-input-container {
@@ -56,6 +150,7 @@
             z-index: 9999;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
+
         .simple-card {
             background: rgba(255, 255, 255, 0.1);
             backdrop-filter: blur(10px);
@@ -72,6 +167,7 @@
             max-width: 400px;
             text-align: center;
         }
+
         #simpleChatInput {
             padding: 14px 20px;
             border-radius: 10px;
@@ -81,48 +177,71 @@
             width: 100%;
             font-size: 16px;
             box-sizing: border-box;
-            box-shadow: inset 0 2px 4px rgba(0,0,0,0.06);
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.06);
             transition: border-color 0.3s;
         }
+
         #simpleChatInput:focus {
             border-color: #3b82f6;
         }
-        #simpleSendBtn {
+
+        #simpleSendBtn,
+        #simpleConfirmBtn {
             padding: 14px 28px;
             border-radius: 10px;
             border: none;
-            background: #3b82f6;
             color: white;
             cursor: pointer;
             font-size: 16px;
             font-weight: 600;
-            width: 100%;
+            flex: 1;
             transition: background-color 0.3s, transform 0.1s;
+        }
+
+        #simpleSendBtn {
+            background: #3b82f6;
             box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4);
         }
+
         #simpleSendBtn:hover:not(:disabled) {
             background: #2563eb;
         }
-        #simpleSendBtn:active:not(:disabled) {
+
+        #simpleConfirmBtn {
+            background: #10b981;
+            box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);
+        }
+
+        #simpleConfirmBtn:hover:not(:disabled) {
+            background: #059669;
+        }
+
+        #simpleSendBtn:active:not(:disabled),
+        #simpleConfirmBtn:active:not(:disabled) {
             transform: scale(0.98);
         }
-        #simpleSendBtn:disabled {
+
+        #simpleSendBtn:disabled,
+        #simpleConfirmBtn:disabled {
             background: #6b7280;
             cursor: not-allowed;
             box-shadow: none;
             opacity: 0.6;
         }
+
         #simpleChatInput:disabled {
             background: rgba(255, 255, 255, 0.5);
             cursor: not-allowed;
         }
     </style>
 </head>
+
 <body>
     <div id="main-container">
         <h1>WebRTC P2P 接收端 (Receiver)</h1>
         <label for="signalingServerUrl">信令伺服器 URL:</label>
-        <input type="text" id="signalingServerUrl" placeholder="例如: https://your-app.onrender.com" value="https://webrtc-signaling-server-v1c9.onrender.com" style="width: 300px;" />
+        <input type="text" id="signalingServerUrl" placeholder="例如: https://your-app.onrender.com"
+            value="https://webrtc-signaling-server-v1c9.onrender.com" style="width: 300px;" />
         <button id="connectBtn">連線</button>
         <button id="disconnectBtn" disabled>斷線</button>
         <span id="currentRoomDisplay" style="margin-left: 10px; font-weight: bold; color: #2196F3;"></span>
@@ -138,15 +257,19 @@
                     <input type="file" id="fileInput" disabled multiple title="點擊選擇要上傳的檔案">
                     <div id="download-area"></div>
                     <div id="file-status" style="margin-top: 10px; font-size: 0.85em; color: #555;"></div>
-                    <div id="progress-bar" style="width: 100%; background-color: #f0f0f0; border-radius: 5px; height: 20px; margin-top: 5px; display: none;">
-                        <div id="progress" style="background-color: #4CAF50; height: 100%; width: 0; border-radius: 5px;"></div>
+                    <div id="progress-bar"
+                        style="width: 100%; background-color: #f0f0f0; border-radius: 5px; height: 20px; margin-top: 5px; display: none;">
+                        <div id="progress"
+                            style="background-color: #4CAF50; height: 100%; width: 0; border-radius: 5px;"></div>
                     </div>
                     <div id="total-status" style="margin-top: 10px; font-size: 0.85em; font-weight: bold;"></div>
-                    <div id="total-progress-bar" style="width: 100%; background-color: #f0f0f0; border-radius: 5px; height: 10px; margin-top: 5px; display: none;">
-                        <div id="total-progress" style="background-color: #2196F3; height: 100%; width: 0; border-radius: 5px;"></div>
+                    <div id="total-progress-bar"
+                        style="width: 100%; background-color: #f0f0f0; border-radius: 5px; height: 10px; margin-top: 5px; display: none;">
+                        <div id="total-progress"
+                            style="background-color: #2196F3; height: 100%; width: 0; border-radius: 5px;"></div>
                     </div>
                 </div>
-                
+
                 <div id="file-browser">
                     <h3>遠端檔案瀏覽器 (Remote FS)</h3>
                     <button id="refreshFsBtn" disabled>重新整理目錄</button>
@@ -162,12 +285,17 @@
         </div>
     </div>
 
-    <!-- 特別模式 UI：只顯示文本輸入框和送出按鈕 -->
+    <!-- 特別模式 UI：只顯示文本輸入框、送出與確認按鈕 -->
     <div id="simple-input-container">
         <div class="simple-card">
-            <div id="status-text" style="color: #fff; font-size: 1.1em; font-weight: 500; margin-bottom: 5px; opacity: 0.9;">正在建立 P2P 連線...</div>
+            <div id="status-text"
+                style="color: #fff; font-size: 1.1em; font-weight: 500; margin-bottom: 5px; opacity: 0.9;">正在建立 P2P
+                連線...</div>
             <input type="text" id="simpleChatInput" placeholder="請輸入名稱..." disabled />
-            <button id="simpleSendBtn" disabled>送出</button>
+            <div style="display: flex; gap: 10px; width: 100%;">
+                <button id="simpleSendBtn" disabled>送出</button>
+                <button id="simpleConfirmBtn" disabled>確認</button>
+            </div>
         </div>
     </div>
 
@@ -198,7 +326,7 @@
         let peerConnection;
         let dataChannel;
         let roomName;
-        let targetRooms = ['control','control1', 'control2', 'control3'];
+        let targetRooms = ['control', 'control1', 'control2', 'control3'];
         let currentCheckingIndex = 0;
         let currentPath = '/';   // 追蹤目前目錄路徑
         let currentPage = 1;     // 追蹤目前頁碼
@@ -218,10 +346,10 @@
         // STUN 伺服器設定，用於 NAT 穿透
         const iceServers = {
             'iceServers': [
-                {'urls': 'stun:stun.l.google.com:19302'}
+                { 'urls': 'stun:stun.l.google.com:19302' }
             ]
         };
-            // 設定返回按鈕屬性並加入 DOM
+        // 設定返回按鈕屬性並加入 DOM
         backFsBtn.id = 'backFsBtn';
         backFsBtn.innerText = '回到上一層';
         backFsBtn.disabled = true;
@@ -235,7 +363,7 @@
         // 點擊 "連線" 按鈕
         connectBtn.onclick = () => {
             if (isConnecting) return;
-            
+
             isConnecting = true;
             connectBtn.disabled = true;
             disconnectBtn.disabled = true; // 尋找房間階段，連線尚未成功，斷線按鈕禁用
@@ -264,12 +392,12 @@
             if (dataChannel) dataChannel.close();
             if (peerConnection) peerConnection.close();
             if (socket) socket.disconnect();
-            
+
             peerConnection = null;
             dataChannel = null;
             roomName = null;
             isConnecting = false;
-            
+
             connectBtn.disabled = false;
             disconnectBtn.disabled = true;
             disableChatAndFileTransfer();
@@ -320,7 +448,7 @@
                 currentCheckingIndex++;
                 checkNextRoom();
             });
-            
+
             // 處理 Socket 斷開的情況
             socketInstance.on('disconnect', () => {
                 console.log('信令伺服器連線斷開');
@@ -346,7 +474,7 @@
                     else reason = "狀態未知";
 
                     roomSearchLogs.push(`- ${status.room}: ${reason}`);
-                    
+
                     currentCheckingIndex++;
                     checkNextRoom();
                 }
@@ -405,17 +533,17 @@
         function setupDataChannel() {
             dataChannel.onopen = () => {
                 console.log("Data Channel 已開啟");
-                isConnecting = false; 
+                isConnecting = false;
                 // 只有在 DataChannel 開啟後，才算真正連線成功
                 connectBtn.disabled = true;
                 disconnectBtn.disabled = false;
                 currentRoomDisplay.innerText = `目前房間: ${roomName}`;
-                
+
                 appendMessage('系統', 'P2P 連線已建立！');
-                
+
                 if (isTransferring) {
                     appendMessage('系統', '檢測到中斷的傳送任務，正在嘗試自動續傳...');
-                    sendNextFile(); 
+                    sendNextFile();
                 }
                 enableChatAndFileTransfer();
                 requestLS(currentPath, 1); // 連線建立後自動取得遠端檔案列表，預設第一頁
@@ -520,10 +648,10 @@
                 const isImage = !file.isDir && file.name.match(/\.(jpg|jpeg|png|gif|webp|bmp)$/i);
                 console.log('isImage (match result):', isImage);
                 console.log('file.thumbnail:', file.thumbnail);
-                
+
                 const item = document.createElement('div');
                 item.className = 'file-item';
-                
+
                 // 處理縮圖數據：確保有 data:image 前綴
                 let thumbSrc = file.thumbnail;
                 if (thumbSrc && !thumbSrc.startsWith('data:')) {
@@ -531,8 +659,8 @@
                 }
 
                 const icon = file.isDir ? '📁' : (isImage ? '🖼️' : '📄');
-                const thumbContent = (isImage && thumbSrc) 
-                    ? `<img src="${thumbSrc}" alt="${file.name}">` 
+                const thumbContent = (isImage && thumbSrc)
+                    ? `<img src="${thumbSrc}" alt="${file.name}">`
                     : icon;
                 console.log('Determined icon:', icon);
                 console.log('Thumbnail content:', thumbContent);
@@ -629,15 +757,15 @@
                 const lsCommandObject = { type: 'LS', path: path, currentPage: page }; // 包含 currentPage
                 // 步驟 2: 將 LS 指令物件轉換為 JSON 字串
                 const lsJsonString = JSON.stringify(lsCommandObject);
-                       // 步驟 3: 建立外部的 chat 訊息物件，將 lsJsonString 作為其 text 內容
+                // 步驟 3: 建立外部的 chat 訊息物件，將 lsJsonString 作為其 text 內容
                 const chatMessageObject = { type: 'chat', text: lsJsonString };
                 // 步驟 4: 將外部 chat 訊息物件轉換為最終要發送的 JSON 字串
                 const finalJsonString = JSON.stringify(chatMessageObject);
                 // console.log 看到的是 JS Object (無引號)，jsonString 才是真正的 JSON (有雙引號)
                 console.log('發送指令 (Object):', finalJsonString);
-                
+
                 dataChannel.send(finalJsonString);
-    
+
                 appendMessage('系統指令', `請求目錄: ${path}`);
                 console.log('LS 指令已成功發送。'); // 確認指令已發送
             } else {
@@ -675,7 +803,7 @@
             const oldName = selectedFileAction.name;
             const newName = prompt(`請輸入 ${selectedFileAction.name} 的新名稱:`, selectedFileAction.name);
             if (newName && newName !== selectedFileAction.name) {
-                sendFsCommand('RENAME', currentPath, { old : oldName, new : newName });
+                sendFsCommand('RENAME', currentPath, { old: oldName, new: newName });
                 // 延遲 500ms 後刷新列表，嘗試保持在當前頁
                 setTimeout(() => requestLS(currentPath, currentPage), 500);
             }
@@ -724,7 +852,7 @@
         };
         mkdirBtn.onclick = () => {
             let dirName = prompt('請輸入新目錄名稱:');
-            
+
             // 1. 檢查是否取消輸入
             if (dirName === null) return;
 
@@ -769,7 +897,7 @@
         fileInput.onchange = () => {
             transferQueue = Array.from(fileInput.files);
             if (transferQueue.length === 0) return;
-            
+
             currentFileIndex = 0;
             currentOffset = 0;
             failedFiles = [];
@@ -777,7 +905,7 @@
 
             totalProgressBarContainer.style.display = 'block';
             progressBarContainer.style.display = 'block';
-            
+
             if (!dataChannel || dataChannel.readyState !== 'open') {
                 appendMessage('系統', '連線未就緒，將在連線建立後自動開始傳送。');
                 return;
@@ -792,8 +920,8 @@
             failedFiles.push(fileName);
             currentFileIndex++;
             currentOffset = 0; // 失敗後重置位移量
-            progressBar.style.width = '0%'; 
-            setTimeout(sendNextFile, 500); 
+            progressBar.style.width = '0%';
+            setTimeout(sendNextFile, 500);
         };
 
         const sendNextFile = () => {
@@ -809,7 +937,7 @@
                 appendMessage('系統', resultMsg);
                 totalStatusLabel.innerText = resultMsg;
                 fileStatusLabel.innerText = '';
-                fileInput.value = ''; 
+                fileInput.value = '';
                 isTransferring = false;
                 return;
             }
@@ -819,71 +947,71 @@
             totalStatusLabel.innerText = `總進度: 已完成 ${currentFileIndex} / ${transferQueue.length} 個檔案`;
             totalProgressBar.style.width = (currentFileIndex / transferQueue.length * 100) + '%';
 
-                try {
-                    // 傳送檔案資訊，並包含目標路徑
-                    dataChannel.send(JSON.stringify({ 
-                        type: 'file-meta', 
-                        name: file.name, 
-                        size: file.size,
-                        path: currentPath,
-                        startOffset: currentOffset // 告知接收端從哪裡開始寫入
-                    }));
-                } catch (err) {
-                    handleFailure(file.name, "無法發送元數據: " + err.message);
+            try {
+                // 傳送檔案資訊，並包含目標路徑
+                dataChannel.send(JSON.stringify({
+                    type: 'file-meta',
+                    name: file.name,
+                    size: file.size,
+                    path: currentPath,
+                    startOffset: currentOffset // 告知接收端從哪裡開始寫入
+                }));
+            } catch (err) {
+                handleFailure(file.name, "無法發送元數據: " + err.message);
+                return;
+            }
+
+            const chunkSize = 16384; // 16KB
+
+            const sendChunk = () => {
+                // 檢查緩衝區是否已滿
+                const bufferFullThreshold = 1024 * 1024;
+                if (dataChannel.bufferedAmount > bufferFullThreshold) {
+                    dataChannel.onbufferedamountlow = () => {
+                        dataChannel.onbufferedamountlow = null;
+                        sendChunk();
+                    };
                     return;
                 }
 
-                const chunkSize = 16384; // 16KB
+                if (currentOffset >= file.size) {
+                    dataChannel.send(JSON.stringify({ type: 'file-end' }));
+                    appendMessage('系統', `檔案 ${file.name} 傳送完成。`);
 
-                const sendChunk = () => {
-                    // 檢查緩衝區是否已滿
-                    const bufferFullThreshold = 1024 * 1024;
-                    if (dataChannel.bufferedAmount > bufferFullThreshold) {
-                        dataChannel.onbufferedamountlow = () => {
-                            dataChannel.onbufferedamountlow = null;
-                            sendChunk();
-                        };
-                        return;
+                    currentOffset = 0; // 完成後重置位移量
+                    const overallPercent = ((currentFileIndex + 1) / transferQueue.length) * 100;
+                    totalProgressBar.style.width = overallPercent + '%';
+
+                    setTimeout(() => {
+                        requestLS(currentPath);
+                        currentFileIndex++;
+                        sendNextFile();
+                    }, 500);
+                    return;
+                }
+
+                const slice = file.slice(currentOffset, currentOffset + chunkSize);
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        dataChannel.send(e.target.result);
+                        currentOffset += e.target.result.byteLength;
+
+                        // 更新單一檔案的進度條
+                        const filePercent = Math.round((currentOffset / file.size) * 100);
+                        progressBar.style.width = filePercent + '%';
+
+                        sendChunk(); // 繼續傳送目前檔案的下一個區塊
+                    } catch (error) { // 這裡的 error 可能是 DataChannel 關閉導致的
+                        // 注意：此處錯誤通常代表連線已斷，sendNextFile 會在 onopen 重新觸發
+                        handleFailure(file.name, error.message);
                     }
-
-                    if (currentOffset >= file.size) {
-                        dataChannel.send(JSON.stringify({ type: 'file-end' }));
-                        appendMessage('系統', `檔案 ${file.name} 傳送完成。`);
-                        
-                        currentOffset = 0; // 完成後重置位移量
-                        const overallPercent = ((currentFileIndex + 1) / transferQueue.length) * 100;
-                        totalProgressBar.style.width = overallPercent + '%';
-                        
-                        setTimeout(() => {
-                            requestLS(currentPath);
-                            currentFileIndex++;
-                            sendNextFile();
-                        }, 500); 
-                        return;
-                    }
-
-                    const slice = file.slice(currentOffset, currentOffset + chunkSize);
-                    const reader = new FileReader();
-                    reader.onload = (e) => {
-                        try {
-                            dataChannel.send(e.target.result);
-                            currentOffset += e.target.result.byteLength;
-
-                                // 更新單一檔案的進度條
-                                const filePercent = Math.round((currentOffset / file.size) * 100);
-                                progressBar.style.width = filePercent + '%';
-
-                            sendChunk(); // 繼續傳送目前檔案的下一個區塊
-                        } catch (error) { // 這裡的 error 可能是 DataChannel 關閉導致的
-                            // 注意：此處錯誤通常代表連線已斷，sendNextFile 會在 onopen 重新觸發
-                                handleFailure(file.name, error.message);
-                        }
-                    };
-                        reader.onerror = () => handleFailure(file.name, "讀取檔案失敗");
-                    reader.readAsArrayBuffer(slice);
                 };
+                reader.onerror = () => handleFailure(file.name, "讀取檔案失敗");
+                reader.readAsArrayBuffer(slice);
+            };
 
-                sendChunk();
+            sendChunk();
         };
 
         function createDownloadLink(blob, fileName) {
@@ -899,16 +1027,16 @@
             sendBtn.disabled = false;
             fileInput.disabled = false;
             refreshFsBtn.disabled = false;
-             backFsBtn.disabled = false;
-             mkdirBtn.disabled = false;
+            backFsBtn.disabled = false;
+            mkdirBtn.disabled = false;
 
-             // 啟用特別模式的輸入框與按鈕
-             const simpleChatInput = document.getElementById('simpleChatInput');
-             const simpleSendBtn = document.getElementById('simpleSendBtn');
-             const statusText = document.getElementById('status-text');
-             if (simpleChatInput) simpleChatInput.disabled = false;
-             if (simpleSendBtn) simpleSendBtn.disabled = false;
-             if (statusText) statusText.innerText = '連線成功，請輸入名稱';
+            // 啟用特別模式的輸入框與按鈕
+            const simpleChatInput = document.getElementById('simpleChatInput');
+            const simpleSendBtn = document.getElementById('simpleSendBtn');
+            const statusText = document.getElementById('status-text');
+            if (simpleChatInput) simpleChatInput.disabled = false;
+            if (simpleSendBtn) simpleSendBtn.disabled = false;
+            if (statusText) statusText.innerText = '連線成功，請輸入名稱';
         }
 
         function disableChatAndFileTransfer() {
@@ -916,20 +1044,20 @@
             sendBtn.disabled = true;
             fileInput.disabled = true;
             refreshFsBtn.disabled = true;
-             backFsBtn.disabled = true;
-             mkdirBtn.disabled = true;
+            backFsBtn.disabled = true;
+            mkdirBtn.disabled = true;
 
-             // 停用特別模式的輸入框與按鈕
-             const simpleChatInput = document.getElementById('simpleChatInput');
-             const simpleSendBtn = document.getElementById('simpleSendBtn');
-             const statusText = document.getElementById('status-text');
-             if (simpleChatInput) simpleChatInput.disabled = true;
-             if (simpleSendBtn) simpleSendBtn.disabled = true;
-             if (statusText) statusText.innerText = '連線已斷開';
+            // 停用特別模式的輸入框與按鈕
+            const simpleChatInput = document.getElementById('simpleChatInput');
+            const simpleSendBtn = document.getElementById('simpleSendBtn');
+            const statusText = document.getElementById('status-text');
+            if (simpleChatInput) simpleChatInput.disabled = true;
+            if (simpleSendBtn) simpleSendBtn.disabled = true;
+            if (statusText) statusText.innerText = '連線已斷開';
         }
 
         // 檢查網址參數是否有指定房間或信令伺服器，若有則直接連線
-        (function() {
+        (function () {
             const urlParams = new URLSearchParams(window.location.search);
             let urlRoom = urlParams.get('room') || urlParams.get('roomName');
             if (!urlRoom && window.location.hash) {
@@ -956,6 +1084,7 @@
                 // 綁定送出事件
                 const simpleChatInput = document.getElementById('simpleChatInput');
                 const simpleSendBtn = document.getElementById('simpleSendBtn');
+                const simpleConfirmBtn = document.getElementById('simpleConfirmBtn');
                 const statusText = document.getElementById('status-text');
 
                 simpleSendBtn.onclick = () => {
@@ -966,8 +1095,24 @@
                         dataChannel.send(JSON.stringify(outerPayload));
                         console.log('已送出 SET_NAME 訊息:', outerPayload);
                         simpleChatInput.value = '';
-                        
+
                         statusText.innerText = `已送出名稱: ${nameVal}`;
+                        setTimeout(() => {
+                            if (dataChannel && dataChannel.readyState === 'open') {
+                                statusText.innerText = '連線成功，請輸入名稱';
+                            }
+                        }, 2000);
+                    }
+                };
+
+                simpleConfirmBtn.onclick = () => {
+                    if (dataChannel && dataChannel.readyState === 'open') {
+                        const innerPayload = { type: "CONFIRM" };
+                        const outerPayload = { type: "chat", text: JSON.stringify(innerPayload) };
+                        dataChannel.send(JSON.stringify(outerPayload));
+                        console.log('已送出 CONFIRM 訊息:', outerPayload);
+
+                        statusText.innerText = `已送出確認`;
                         setTimeout(() => {
                             if (dataChannel && dataChannel.readyState === 'open') {
                                 statusText.innerText = '連線成功，請輸入名稱';
@@ -989,4 +1134,5 @@
 
     </script>
 </body>
+
 </html>
