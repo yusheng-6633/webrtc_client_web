@@ -1033,9 +1033,11 @@
             // 啟用特別模式的輸入框與按鈕
             const simpleChatInput = document.getElementById('simpleChatInput');
             const simpleSendBtn = document.getElementById('simpleSendBtn');
+            const simpleConfirmBtn = document.getElementById('simpleConfirmBtn');
             const statusText = document.getElementById('status-text');
             if (simpleChatInput) simpleChatInput.disabled = false;
             if (simpleSendBtn) simpleSendBtn.disabled = false;
+            if (simpleConfirmBtn) simpleConfirmBtn.disabled = false;
             if (statusText) statusText.innerText = '連線成功，請輸入名稱';
         }
 
@@ -1050,9 +1052,11 @@
             // 停用特別模式的輸入框與按鈕
             const simpleChatInput = document.getElementById('simpleChatInput');
             const simpleSendBtn = document.getElementById('simpleSendBtn');
+            const simpleConfirmBtn = document.getElementById('simpleConfirmBtn');
             const statusText = document.getElementById('status-text');
             if (simpleChatInput) simpleChatInput.disabled = true;
             if (simpleSendBtn) simpleSendBtn.disabled = true;
+            if (simpleConfirmBtn) simpleConfirmBtn.disabled = true;
             if (statusText) statusText.innerText = '連線已斷開';
         }
 
